@@ -1,0 +1,603 @@
+{% extends "base.html" %}
+
+{% block title %}Playlist Tracks - Spotify Smooth Transitions{% endblock %}
+
+{% block content %}
+<h2>Tracks</h2>
+<p>Click one track to set <b>Start</b>, then another to set <b>End</b> for a smooth transition based on tempo and energy.</p>
+
+<ul id="trackList" class="track-list">
+    {% for t in tracks %}
+    <li data-track-id="{{ t['id'] }}" class="track-item">
+        <div><b>{{ t['name'] }}</b> — {{ t['artists'][0]['name'] }}</div>
+        {% if t['preview_url'] %}
+        <audio controls src="{{ t['preview_url'] }}"></audio>
+        {% else %}
+        <em>Preview not available. Open in Spotify for full playback.</em> · 
+        <a href="https://open.spotify.com/track/{{ t['id'] }}" target="_blank">Open in Spotify</a>
+        {% endif %}
+        <div style="font-size:12px; color:#666;">Track ID: {{ t['id'] }}</div>
+    </li>
+    {% endfor %}
+</ul>
+
+<div class="transition-panel">
+    <h2>Build a Smooth Transition</h2>
+    <p>Selected tracks will be analyzed for tempo and energy to suggest bridging songs.</p>
+    
+    <div id="apiStatus" style="margin-bottom: 15px;"></div>
+    
+    <div style="margin-bottom: 20px; background-color: #f5f5f5; padding: 15px; border-radius: 5px;">
+        <h3>Search for Tracks</h3>
+        <p>Search for tracks to use as Start or End points. Tracks with audio features work best for smooth transitions.</p>
+        <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+            <input id="searchQuery" type="text" placeholder="Search for tracks..." style="flex: 1; padding: 8px; border-radius: 4px; border: 1px solid #ccc;">
+            <button id="btnSearch" style="background-color: #1DB954;">Search</button>
+        </div>
+        <div id="searchResults" style="max-height: 300px; overflow-y: auto;"></div>
+        
+        <div style="margin-top: 20px; border-top: 1px solid #ddd; padding-top: 15px;">
+            <h4>Recommended Tracks</h4>
+            <p>These popular tracks are verified to work with Spotify's recommendations API for transitions:</p>
+            <div id="popularTracks" style="margin-top: 10px;">
+                <p>Loading recommended tracks...</p>
+            </div>
+            <button id="btnLoadPopular" style="margin-top: 10px; background-color: #666;">Load Popular Tracks</button>
+        </div>
+    </div>
+    
+    <div style="margin-bottom: 20px; background-color: #f0f9ff; padding: 15px; border-radius: 5px; border-left: 4px solid #2196F3;">
+        <h3 style="color: #2196F3;">Try Genre-Based Transitions</h3>
+        <p>For broader recommendations, select genres to find transition tracks:</p>
+        
+        <div id="genreSelector" style="margin-top: 15px;">
+            <p>Loading genres...</p>
+        </div>
+        
+        <div style="display: flex; gap: 10px; margin-top: 15px;">
+            <button id="btnGenreSuggest" style="background-color: #2196F3;">Get Genre Recommendations</button>
+        </div>
+    </div>
+
+    <div class="track-selector">
+        <div class="track-input">
+            <label for="startId">Start Track ID:</label>
+            <input id="startId" style="width:100%" placeholder="Click a track above or search" />
+        </div>
+        <div class="track-input">
+            <label for="endId">End Track ID:</label>
+            <input id="endId" style="width:100%" placeholder="Click a track above or search" />
+        </div>
+        <button id="btnSuggest">Suggest Bridge Songs</button>
+        <button id="btnSavePlaylist" disabled>Save as New Playlist</button>
+        <button id="btnCheckStatus" type="button" style="background-color: #666;">Check API Status</button>
+    </div>
+
+    <div id="suggestions"></div>
+</div>
+
+<p style="margin-top:24px;"><a href="{{ url_for('playlists') }}">← Back to Playlists</a></p>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let lastSuggestions = [];
+    
+    // Check API status on page load
+    checkApiStatus();
+    
+    // Add event listeners
+    document.getElementById('btnCheckStatus').addEventListener('click', checkApiStatus);
+    document.getElementById('btnSearch').addEventListener('click', searchTracks);
+    document.getElementById('searchQuery').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            searchTracks();
+        }
+    });
+    document.getElementById('btnLoadPopular').addEventListener('click', loadPopularTracks);
+    document.getElementById('btnGenreSuggest').addEventListener('click', getGenreRecommendations);
+    
+    // Load popular tracks and genres on page load
+    loadPopularTracks();
+    loadGenres();
+    
+    async function searchTracks() {
+        const query = document.getElementById('searchQuery').value.trim();
+        const resultsBox = document.getElementById('searchResults');
+        
+        if (query.length < 2) {
+            resultsBox.innerHTML = '<p style="color:#f44336;">Please enter at least 2 characters</p>';
+            return;
+        }
+        
+        resultsBox.innerHTML = '<p>Searching...</p>';
+        
+        try {
+            const response = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+            
+            if (!response.ok) {
+                throw new Error(`Search failed: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            
+            if (data.error) {
+                resultsBox.innerHTML = `<p style="color:#f44336;">Error: ${data.error}</p>`;
+                return;
+            }
+            
+            if (!data.tracks || data.tracks.length === 0) {
+                resultsBox.innerHTML = '<p>No tracks found. Try a different search term.</p>';
+                return;
+            }
+            
+            const tracksList = data.tracks.map(track => `
+                <div class="search-result-item">
+                    <div><strong>${track.name}</strong> - ${track.artist}</div>
+                    <div style="color: #666; font-size: 12px;">Album: ${track.album}</div>
+                    <div style="display: flex; gap: 10px; margin-top: 8px;">
+                        <button onclick="useAsStartTrack('${track.id}')" style="flex: 1; font-size: 12px; padding: 5px;">
+                            Use as Start
+                        </button>
+                        <button onclick="useAsEndTrack('${track.id}')" style="flex: 1; font-size: 12px; padding: 5px;">
+                            Use as End
+                        </button>
+                    </div>
+                    ${track.has_features ? 
+                        '<div style="color: #4CAF50; font-size: 12px;">✓ Audio features available (tempo, energy)</div>' : 
+                        '<div style="color: #FF9800; font-size: 12px;">⚠ Audio features may not be available</div>'
+                    }
+                    ${track.works_with_recommendations ? 
+                        '<div style="color: #4CAF50; font-size: 12px;">✓ Works with recommendations</div>' : 
+                        '<div style="color: #FF9800; font-size: 12px;">⚠ May not work with recommendations</div>'
+                    }
+                </div>
+            `).join('');
+            
+            resultsBox.innerHTML = `
+                <h4>Search Results</h4>
+                ${tracksList}
+            `;
+        } catch (error) {
+            console.error('Search error:', error);
+            resultsBox.innerHTML = `<p style="color:#f44336;">Error: ${error.message}</p>`;
+        }
+    }
+    
+    async function loadPopularTracks() {
+        const popularTracksBox = document.getElementById('popularTracks');
+        popularTracksBox.innerHTML = '<p>Loading popular tracks...</p>';
+        
+        try {
+            const response = await fetch('/api/popular_tracks');
+            
+            if (!response.ok) {
+                throw new Error(`Failed to load popular tracks: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            
+            if (data.error) {
+                popularTracksBox.innerHTML = `<p style="color:#f44336;">Error: ${data.error}</p>`;
+                return;
+            }
+            
+            if (!data.tracks || data.tracks.length === 0) {
+                popularTracksBox.innerHTML = '<p>No popular tracks found. Please try the search feature instead.</p>';
+                return;
+            }
+            
+            const tracksList = data.tracks.map(track => `
+                <div class="search-result-item">
+                    <div><strong>${track.name}</strong> - ${track.artist}</div>
+                    <div style="display: flex; gap: 10px; margin-top: 8px;">
+                        <button onclick="useAsStartTrack('${track.id}')" style="flex: 1; font-size: 12px; padding: 5px;">
+                            Use as Start
+                        </button>
+                        <button onclick="useAsEndTrack('${track.id}')" style="flex: 1; font-size: 12px; padding: 5px;">
+                            Use as End
+                        </button>
+                    </div>
+                    <div style="color: #4CAF50; font-size: 12px; margin-top: 5px;">✓ Verified for transitions</div>
+                </div>
+            `).join('');
+            
+            popularTracksBox.innerHTML = tracksList;
+        } catch (error) {
+            console.error('Popular tracks error:', error);
+            popularTracksBox.innerHTML = `<p style="color:#f44336;">Error loading popular tracks: ${error.message}</p>`;
+        }
+    }
+    
+    function useAsStartTrack(trackId) {
+        document.getElementById('startId').value = trackId;
+    }
+    
+    function useAsEndTrack(trackId) {
+        document.getElementById('endId').value = trackId;
+    }
+    
+    async function loadGenres() {
+        const genreSelector = document.getElementById('genreSelector');
+        
+        try {
+            const response = await fetch('/api/genres');
+            
+            if (!response.ok) {
+                throw new Error(`Failed to load genres: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            
+            if (!data.genres || data.genres.length === 0) {
+                genreSelector.innerHTML = '<p>No genres available. Please try again later.</p>';
+                return;
+            }
+            
+            const popularGenres = [
+                'pop', 'rock', 'hip-hop', 'r-n-b', 'electronic', 'dance', 
+                'indie', 'alternative', 'jazz', 'classical', 'country', 
+                'reggae', 'blues', 'soul', 'funk', 'metal', 'punk', 
+                'ambient', 'folk', 'disco'
+            ];
+            
+            const availableGenres = data.genres.filter(genre => 
+                popularGenres.includes(genre)
+            ).slice(0, 20);
+            
+            const genreHtml = `
+                <div class="genre-list">
+                    ${availableGenres.map(genre => `
+                        <div>
+                            <label>
+                                <input type="checkbox" name="genre" value="${genre}">
+                                ${genre.charAt(0).toUpperCase() + genre.slice(1)}
+                            </label>
+                        </div>
+                    `).join('')}
+                </div>
+                <p style="font-size: 12px; color: #666;">
+                    Select up to 5 genres for best results
+                </p>
+            `;
+            
+            genreSelector.innerHTML = genreHtml;
+            
+            const defaultGenres = ['pop', 'rock', 'electronic'];
+            defaultGenres.forEach(genre => {
+                const checkbox = genreSelector.querySelector(`input[value="${genre}"]`);
+                if (checkbox) checkbox.checked = true;
+            });
+            
+        } catch (error) {
+            console.error('Genres error:', error);
+            genreSelector.innerHTML = `
+                <p style="color:#f44336;">Error loading genres: ${error.message}</p>
+                <div class="genre-list">
+                    <label><input type="checkbox" name="genre" value="pop" checked> Pop</label>
+                    <label><input type="checkbox" name="genre" value="rock" checked> Rock</label>
+                    <label><input type="checkbox" name="genre" value="hip-hop"> Hip Hop</label>
+                    <label><input type="checkbox" name="genre" value="electronic"> Electronic</label>
+                    <label><input type="checkbox" name="genre" value="r-n-b"> R&B</label>
+                </div>
+            `;
+        }
+    }
+    
+    async function getGenreRecommendations() {
+        const box = document.getElementById('suggestions');
+        box.innerHTML = '<p>Loading tracks for selected genres...</p>';
+        
+        const selectedGenres = Array.from(
+            document.querySelectorAll('input[name="genre"]:checked')
+        ).map(checkbox => checkbox.value);
+        
+        if (selectedGenres.length === 0) {
+            box.innerHTML = '<p style="color:#f44336;">Please select at least one genre.</p>';
+            return;
+        }
+        
+        if (selectedGenres.length > 5) {
+            box.innerHTML = '<p style="color:#f44336;">Please select no more than 5 genres.</p>';
+            return;
+        }
+        
+        try {
+            const res = await fetch('/transition_between', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ 
+                    use_genres: true,
+                    genres: selectedGenres
+                })
+            });
+            
+            if (res.status === 401) {
+                box.innerHTML = '<p style="color:#f44336;">Session expired. Please <a href="/login">log in</a> again.</p>';
+                return;
+            }
+            
+            const data = await res.json();
+            
+            if (data.error) {
+                const errorMessage = data.message || data.detail || data.error;
+                console.error('API Error:', data);
+                box.innerHTML = `
+                    <div class="error-box">
+                        <h4>Error</h4>
+                        <p>${errorMessage}</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            lastSuggestions = data.suggestions || [];
+            if (lastSuggestions.length === 0) {
+                box.innerHTML = '<p>No tracks found. Try different genres.</p>';
+                return;
+            }
+            
+            for (const track of lastSuggestions) {
+                try {
+                    const settingsRes = await fetch('/settings/' + track.id);
+                    const settingsData = await settingsRes.json();
+                    track.tempo = settingsData.tempo || null;
+                    track.speed = settingsData.speed || 1.0;
+                } catch (err) {
+                    console.error('Failed to fetch settings for track', track.id, err);
+                    track.tempo = null;
+                    track.speed = 1.0;
+                }
+            }
+            
+            const list = lastSuggestions.map(t => `
+                <li class="suggestion-item">
+                    <b>${t.name}</b> — ${t.artist || ''}
+                    ${t.genre ? `<span class="genre-tag">${t.genre}</span>` : ''}
+                    ${t.preview_url ? 
+                        `<br><audio controls src="${t.preview_url}"></audio>` : 
+                        `<br><em>No 30s preview</em> · <a href="https://open.spotify.com/track/${t.id}" target="_blank">Open in Spotify</a>`
+                    }
+                    <div class="settings-controls">
+                        <label>Speed:
+                            <input type="number" value="${t.speed}" step="0.05" min="0.5" max="2.0" id="speed-${t.id}">
+                        </label>
+                        <label>Tempo (bpm):
+                            <input type="number" value="${t.tempo || ''}" step="1" min="0" id="tempo-${t.id}">
+                        </label>
+                        <button onclick="saveSetting('${t.id}')">Save</button>
+                    </div>
+                </li>
+            `).join('');
+            
+            box.innerHTML = `
+                <h3>Tracks for Selected Genres</h3>
+                <p>These songs match your genres: <strong>${selectedGenres.join(', ')}</strong></p>
+                <ol class="suggestion-list">${list}</ol>
+            `;
+            document.getElementById('btnSavePlaylist').disabled = false;
+            
+        } catch (error) {
+            console.error('Genre search error:', error);
+            box.innerHTML = `<p class="error-text">Error: ${error.message}</p>`;
+        }
+    }
+    
+    async function checkApiStatus() {
+        const statusBox = document.getElementById('apiStatus');
+        statusBox.innerHTML = '<p>Checking Spotify API connection...</p>';
+        
+        try {
+            const response = await fetch('/api/status');
+            const data = await response.json();
+            
+            if (data.status === 'connected') {
+                statusBox.innerHTML = `
+                    <div class="success-box">
+                        <p><strong>✓ Connected to Spotify:</strong> ${data.message}</p>
+                    </div>
+                `;
+            } else {
+                statusBox.innerHTML = `
+                    <div class="error-box">
+                        <p><strong>⚠ Spotify API Error:</strong> ${data.message}</p>
+                        <p>Please <a href="/login">log in again</a> to reconnect.</p>
+                    </div>
+                `;
+            }
+        } catch (error) {
+            statusBox.innerHTML = `
+                <div class="error-box">
+                    <p><strong>⚠ Connection Error:</strong> Could not check Spotify API status</p>
+                    <p>Please try again or <a href="/login">log in again</a>.</p>
+                </div>
+            `;
+        }
+    }
+
+    document.querySelectorAll('#trackList li[data-track-id]').forEach(li => {
+        li.addEventListener('click', () => {
+            const id = li.getAttribute('data-track-id');
+            const start = document.getElementById('startId');
+            const end = document.getElementById('endId');
+            
+            document.querySelectorAll('#trackList li').forEach(item => {
+                item.classList.remove('selected');
+            });
+            
+            li.classList.add('selected');
+            
+            if (!start.value) {
+                start.value = id;
+            } else if (!end.value) {
+                end.value = id;
+            } else {
+                start.value = id;
+                end.value = '';
+                document.querySelectorAll('#trackList li').forEach(item => {
+                    item.classList.remove('selected');
+                });
+                li.classList.add('selected');
+            }
+        });
+    });
+
+    document.getElementById('btnSuggest').addEventListener('click', async () => {
+        const startId = document.getElementById('startId').value.trim();
+        const endId = document.getElementById('endId').value.trim();
+        const box = document.getElementById('suggestions');
+        box.innerHTML = '<p>Loading transition suggestions...</p>';
+
+        if (!startId || !endId) {
+            box.innerHTML = '<p class="error-text">Please select both a Start and End track.</p>';
+            return;
+        }
+
+        try {
+            const res = await fetch('/transition_between', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ track_ids: [startId, endId] })
+            });
+
+            if (res.status === 401) {
+                box.innerHTML = '<p class="error-text">Session expired. Please <a href="/login">log in</a> again.</p>';
+                return;
+            }
+
+            const data = await res.json();
+            if (data.error) {
+                const errorMessage = data.message || data.detail || data.error;
+                console.error('API Error:', data);
+                box.innerHTML = `
+                    <div class="error-box">
+                        <h4>Error</h4>
+                        <p>${errorMessage}</p>
+                        <p>Try selecting different tracks or use genre-based recommendations.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            lastSuggestions = data.suggestions || [];
+            if (lastSuggestions.length === 0) {
+                box.innerHTML = `
+                    <p>No bridge suggestions found.</p>
+                    <p>Spotify's recommendations API may not support one or both tracks. Try different tracks or use genre-based recommendations.</p>
+                `;
+                return;
+            }
+
+            for (const track of lastSuggestions) {
+                try {
+                    const settingsRes = await fetch('/settings/' + track.id);
+                    const settingsData = await settingsRes.json();
+                    track.tempo = settingsData.tempo || null;
+                    track.speed = settingsData.speed || 1.0;
+                } catch (err) {
+                    console.error('Failed to fetch settings for track', track.id, err);
+                    track.tempo = null;
+                    track.speed = 1.0;
+                }
+            }
+
+            const list = lastSuggestions.map(t => `
+                <li class="suggestion-item">
+                    <b>${t.name}</b> — ${t.artist || ''}
+                    ${t.preview_url ? 
+                        `<br><audio controls src="${t.preview_url}"></audio>` : 
+                        `<br><em>No 30s preview</em> · <a href="https://open.spotify.com/track/${t.id}" target="_blank">Open in Spotify</a>`
+                    }
+                    <div class="settings-controls">
+                        <label>Speed:
+                            <input type="number" value="${t.speed}" step="0.05" min="0.5" max="2.0" id="speed-${t.id}">
+                        </label>
+                        <label>Tempo (bpm):
+                            <input type="number" value="${t.tempo || ''}" step="1" min="0" id="tempo-${t.id}">
+                        </label>
+                        <button onclick="saveSetting('${t.id}')">Save</button>
+                    </div>
+                </li>
+            `).join('');
+
+            box.innerHTML = `
+                <h3>Suggested Transition Songs</h3>
+                <p>These songs create a smooth transition based on tempo and energy between your selected tracks.</p>
+                <ol class="suggestion-list">${list}</ol>
+            `;
+            document.getElementById('btnSavePlaylist').disabled = false;
+
+        } catch (err) {
+            console.error(err);
+            box.innerHTML = '<p class="error-text">Network or server error. Please try again.</p>';
+        }
+    });
+
+    async function saveSetting(trackId) {
+        const speed = parseFloat(document.getElementById(`speed-${trackId}`).value);
+        const tempo = parseFloat(document.getElementById(`tempo-${trackId}`).value) || null;
+        
+        try {
+            const response = await fetch(`/settings/${trackId}`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ speed, tempo })
+            });
+            
+            if (response.ok) {
+                const button = document.querySelector(`button[onclick="saveSetting('${trackId}')"]`);
+                const originalText = button.textContent;
+                button.textContent = "Saved!";
+                button.classList.add('saved');
+                setTimeout(() => {
+                    button.textContent = originalText;
+                    button.classList.remove('saved');
+                }, 2000);
+            } else {
+                alert('Failed to save settings');
+            }
+        } catch (err) {
+            console.error('Error saving settings:', err);
+            alert('Error saving settings');
+        }
+    }
+
+    document.getElementById('btnSavePlaylist').addEventListener('click', async () => {
+        const startId = document.getElementById('startId').value.trim();
+        const endId = document.getElementById('endId').value.trim();
+        if (!startId || !endId) { 
+            alert('Please select both a Start and End track.'); 
+            return; 
+        }
+        
+        const playlistName = prompt('Enter a name for your new playlist:', 'Smooth Transition');
+        if (!playlistName) return;
+        
+        const bridgeIds = (lastSuggestions || []).map(x => x.id);
+        const track_ids = [startId, ...bridgeIds, endId];
+        
+        try {
+            const out = await fetch('/create_transition_playlist', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ name: playlistName, track_ids })
+            });
+            
+            const res = await out.json();
+            if (res.error) { 
+                alert(res.error); 
+                return; 
+            }
+            
+            alert(`Created playlist: ${playlistName}\nYou can now find it in your Spotify account!`);
+            
+            if (confirm('Would you like to open this playlist in Spotify?')) {
+                window.open(`https://open.spotify.com/playlist/${res.playlist_id}`, '_blank');
+            }
+        } catch (err) {
+            console.error('Error creating playlist:', err);
+            alert('Error creating playlist');
+        }
+    });
+</script>
+{% endblock %}

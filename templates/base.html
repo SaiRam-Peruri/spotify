@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Spotify Smooth Transitions{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <header>
+        <h1>Spotify Smooth Transitions</h1>
+        <p>Create perfect playlist transitions between your favorite songs</p>
+    </header>
+    
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+    
+    <footer>
+        <p>&copy; {% block year %}2025{% endblock %} Spotify Smooth Transitions</p>
+    </footer>
+    
+    {% block scripts %}{% endblock %}
+</body>
+</html>

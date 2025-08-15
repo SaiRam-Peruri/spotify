@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+
+{% block title %}Welcome - Spotify Smooth Transitions{% endblock %}
+
+{% block content %}
+<div style="text-align: center; margin-top: 50px;">
+    <h2>Welcome to Spotify Smooth Transitions</h2>
+    <p>Create perfect playlist transitions between your favorite songs</p>
+    
+    <div style="margin: 40px 0;">
+        <a href="{{ login_url }}" style="display: inline-block; background-color: #1DB954; color: white; padding: 15px 30px; border-radius: 30px; text-decoration: none; font-weight: bold; font-size: 18px;">
+            Connect with Spotify
+        </a>
+    </div>
+    
+    <div style="max-width: 600px; margin: 0 auto; text-align: left;">
+        <h3>How it works:</h3>
+        <ol>
+            <li>Connect your Spotify account</li>
+            <li>Select a playlist and choose two tracks</li>
+            <li>Get AI-powered song recommendations that create a smooth transition</li>
+            <li>Customize tempo and speed settings for each song</li>
+            <li>Save as a new playlist in your Spotify account</li>
+        </ol>
+    </div>
+</div>
+{% endblock %}
